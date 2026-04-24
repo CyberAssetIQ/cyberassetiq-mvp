@@ -1,0 +1,80 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cyberassetiq
+      POSTGRES_USER: cyberassetiq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyberassetiq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://cyberassetiq:${POSTGRES_PASSWORD}@db:5432/cyberassetiq
+      CYBERASSETIQ_DEFAULT_TENANT: tenant-001
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      AI_GEMINI_MODEL: "gemini-2.0-flash"
+      AI_MODEL_FALLBACK: "gpt-4o"
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MODEL: "llama-3.3-70b-versatile"
+    # NET_ADMIN + NET_RAW allow nmap raw TCP SYN packets and OS fingerprinting.
+    # network_mode: host is NOT used — it does not work on Windows Docker Desktop.
+    # For full LAN discovery on Windows, run the Windows agent on the host machine.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - model_cache:/tmp
+      - ./backend:/app
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+      
+  demo-agent:
+    build:
+      context: ./agent
+    profiles: ["demo-agent"]
+    env_file:
+      - agent/.env.example
+    environment:
+      CYBERASSETIQ_BACKEND_URL: http://backend:8000
+      CYBERASSETIQ_TENANT_ID: tenant-001
+      CYBERASSETIQ_ENROLLMENT_TOKEN: ${CYBERASSETIQ_ENROLLMENT_TOKEN}
+      CYBERASSETIQ_API_KEY: ${CYBERASSETIQ_API_KEY:-}
+      CYBERASSETIQ_VERIFY_TLS: "false"
+      CYBERASSETIQ_QUEUE_DB: /data/agent_queue.db
+      CYBERASSETIQ_POLL_INTERVAL: "300"
+      CYBERASSETIQ_COMMAND_POLL_INTERVAL: "60"
+      SECRETSCORE_MODEL_PATH: /tmp/cyberassetiq_secretscore.pkl
+    volumes:
+      - agent_data:/data
+      - model_cache:/tmp
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  agent_data:
+  model_cache:

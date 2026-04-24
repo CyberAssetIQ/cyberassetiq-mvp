@@ -1,0 +1,39 @@
+Create a login TOKEN
+PS C:\Users\admin\Desktop\cyberassetiq> docker logs cyberassetiq-backend-1 2>&1 | Select-String "api_key|API key|tenant|bootstrap" | Select-Object -First 20
+
+CYBERASSETIQ ←[7mBOOTSTRAP←[0m API KEY (shown once)
+←[7mTenant←[0m:  tenant-001
+←[7mAPI Key←[0m: ciq_pd8ksmM393xTvSMwf3H9u2SHbkSXuNbcpkRABzMzOds
+CYBERASSETIQ ←[7mBOOTSTRAP←[0m ENROLLMENT TOKEN (shown once)
+←[7mTenant←[0m:  tenant-001
+
+PS C:\Users\admin\Desktop\cyberassetiq>
+
+Step 1 — Create an enrollment token (run on the Docker machine):
+
+$headers = @{"X-API-Key" = "ciq_pd8ksmM393xTvSMwf3H9u2SHbkSXuNbcpkRABzMzOds"}
+$body = @{"tenant_id" = "tenant-001"; "label" = "windows-agent-001"} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:8000/api/admin/enrollment-tokens" -Method POST -Headers $headers -Body $body -ContentType "application/json"
+
+
+$headers = @{
+    "X-API-Key" = "ciq_pd8ksmM393xTvSMwf3H9u2SHbkSXuNbcpkRABzMzOds"
+    "X-Tenant-Id" = "tenant-001"
+}
+$body = @{"tenant_id" = "tenant-001"; "label" = "windows-agent-001"} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:8000/api/admin/enrollment-tokens" -Method POST -Headers $headers -Body $body -ContentType "application/json"
+
+
+PS C:\Users\admin\Desktop\cyberassetiq> $headers = @{
+>>     "X-API-Key" = "ciq_pd8ksmM393xTvSMwf3H9u2SHbkSXuNbcpkRABzMzOds"
+>>     "X-Tenant-Id" = "tenant-001"
+>> }
+>> $body = @{"tenant_id" = "tenant-001"; "label" = "windows-agent-001"} | ConvertTo-Json
+>> Invoke-RestMethod -Uri "http://localhost:8000/api/admin/enrollment-tokens" -Method POST -Headers $headers -Body $body -ContentType "application/json"
+
+token                                   tenant_id  label             note
+-----                                   ---------  -----             ----
+enroll_lAnxfKH_RjNFi5_RskB4jYTqht1pmyWm tenant-001 windows-agent-001 One-time use. Set CYBERASSETIQ_ENROLLMENT_TOKEN on the agent.
+
+PS C:\Users\admin\Desktop\cyberassetiq>
+PS C:\Users\admin\Desktop\cyberassetiq>

@@ -1,0 +1,309 @@
+from __future__ import annotations
+
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from api.deps import AuthenticatedRequest, require_read
+from db.session import get_db
+from models.agent import Agent
+from models.asset import CanonicalAsset
+from models.telemetry import CanonicalSoftware, VulnerabilityFinding
+from services.asset_correlation_service import get_unified_asset, list_unified_assets
+
+router = APIRouter()
+
+
+@router.get("")
+def list_assets(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    os_family: str | None = Query(None, description="Filter by OS family (e.g. Windows, Linux, Darwin)"),
+    auth: AuthenticatedRequest = Depends(require_read),
+    db: Session = Depends(get_db),
+):
+    """
+    List managed canonical assets for this tenant.
+    Supports pagination (limit/offset) and optional OS family filter.
+    Open CVE counts are fetched in a single aggregated query — not per-row.
+    """
+    query = db.query(CanonicalAsset).filter(CanonicalAsset.tenant_id == auth.tenant_id)
+    if os_family:
+        query = query.filter(CanonicalAsset.os_family == os_family)
+
+    total = query.count()
+    assets = query.order_by(CanonicalAsset.id.desc()).offset(offset).limit(limit).all()
+
+    agent_ids = [a.agent_id for a in assets]
+    cve_counts: dict[str, int] = {}
+    if agent_ids:
+        rows = (
+            db.query(VulnerabilityFinding.agent_id, func.count(VulnerabilityFinding.id))
+            .filter(
+                VulnerabilityFinding.tenant_id == auth.tenant_id,
+                VulnerabilityFinding.agent_id.in_(agent_ids),
+                VulnerabilityFinding.status == "open",
+            )
+            .group_by(VulnerabilityFinding.agent_id)
+            .all()
+        )
+        cve_counts = {agent_id: count for agent_id, count in rows}
+
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "items": [
+            {
+                "id": a.id,
+                "tenant_id": a.tenant_id,
+                "agent_id": a.agent_id,
+                "hostname": a.hostname,
+                "fqdn": a.fqdn,
+                "os_family": a.os_family,
+                "os_version": a.os_version,
+                "domain": a.domain,
+                "serial_number": a.serial_number,
+                "device_id": a.device_id,
+                "ips": a.ips or [],
+                "macs": a.macs or [],
+                "last_snapshot_epoch": a.last_snapshot_epoch,
+                "open_cve_count": cve_counts.get(a.agent_id, 0),
+            }
+            for a in assets
+        ],
+    }
+
+
+@router.get("/unified")
+def list_unified_assets_route(
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    managed_only: bool = Query(False, description="Return only agent-managed assets"),
+    auth: AuthenticatedRequest = Depends(require_read),
+    db: Session = Depends(get_db),
+):
+    """
+    List unified assets (merging agent + network sources) for this tenant.
+    Sorted by risk score descending. Supports pagination and managed-only filter.
+    """
+    all_assets = list_unified_assets(db, auth.tenant_id)
+    if managed_only:
+        all_assets = [a for a in all_assets if a.get("managed")]
+    total = len(all_assets)
+    page = all_assets[offset: offset + limit]
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "items": page,
+    }
+
+
+@router.get("/software")
+def list_all_software(
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+    search: str | None = Query(None, description="Search by software name"),
+    agent_id: str | None = Query(None, description="Filter by agent ID"),
+    auth: AuthenticatedRequest = Depends(require_read),
+    db: Session = Depends(get_db),
+):
+    """
+    List all software inventory for this tenant across all agents.
+    Includes agent hostname for display. Supports search and pagination.
+    """
+    query = (
+        db.query(CanonicalSoftware, Agent.hostname)
+        .outerjoin(Agent, (Agent.tenant_id == CanonicalSoftware.tenant_id) &
+                          (Agent.agent_id == CanonicalSoftware.agent_id))
+        .filter(CanonicalSoftware.tenant_id == auth.tenant_id)
+    )
+    if search:
+        query = query.filter(CanonicalSoftware.name.ilike("%" + search + "%"))
+    if agent_id:
+        query = query.filter(CanonicalSoftware.agent_id == agent_id)
+
+    total = query.count()
+    rows = (
+        query
+        .order_by(CanonicalSoftware.name.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "id":           sw.id,
+            "agent_id":     sw.agent_id,
+            "hostname":     hostname or sw.agent_id,
+            "name":         sw.name,
+            "version":      sw.version,
+            "publisher":    sw.publisher,
+            "install_date": sw.install_date,
+            "source":       getattr(sw, "source", None),
+        }
+        for sw, hostname in rows
+    ]
+
+
+@router.get("/{agent_id}")
+def get_asset(
+    agent_id: str,
+    auth: AuthenticatedRequest = Depends(require_read),
+    db: Session = Depends(get_db),
+):
+    asset = db.query(CanonicalAsset).filter(
+        CanonicalAsset.tenant_id == auth.tenant_id,
+        CanonicalAsset.agent_id == agent_id,
+    ).first()
+    software = db.query(CanonicalSoftware).filter(
+        CanonicalSoftware.tenant_id == auth.tenant_id,
+        CanonicalSoftware.agent_id == agent_id,
+    ).order_by(CanonicalSoftware.name.asc()).all()
+    agent = db.query(Agent).filter(
+        Agent.tenant_id == auth.tenant_id,
+        Agent.agent_id == agent_id,
+    ).first()
+    open_cves = db.query(VulnerabilityFinding).filter(
+        VulnerabilityFinding.tenant_id == auth.tenant_id,
+        VulnerabilityFinding.agent_id == agent_id,
+        VulnerabilityFinding.status == "open",
+    ).count()
+
+    return {
+        "agent": None if not agent else {
+            "tenant_id": agent.tenant_id,
+            "agent_id": agent.agent_id,
+            "hostname": agent.hostname,
+            "os_family": agent.os_family,
+            "status": agent.status,
+            "last_seen_epoch": agent.last_seen_epoch,
+        },
+        "asset": None if not asset else {
+            "tenant_id": asset.tenant_id,
+            "agent_id": asset.agent_id,
+            "hostname": asset.hostname,
+            "fqdn": asset.fqdn,
+            "os_family": asset.os_family,
+            "os_version": asset.os_version,
+            "domain": asset.domain,
+            "serial_number": asset.serial_number,
+            "device_id": asset.device_id,
+            "ips": asset.ips or [],
+            "macs": asset.macs or [],
+            "last_snapshot_epoch": asset.last_snapshot_epoch,
+            "security_posture": asset.security_posture_json or {},
+        },
+        "software": [
+            {"name": s.name, "version": s.version, "publisher": s.publisher, "install_date": s.install_date}
+            for s in software
+        ],
+        "open_cve_count": open_cves,
+    }
+
+
+# ── Natural Language Asset Query ──────────────────────────────────────────
+
+class NLQueryRequest(BaseModel):
+    question: str
+    tenant_id: Optional[str] = None
+
+
+@router.post("/nl-query")
+def natural_language_asset_query(
+    body: NLQueryRequest,
+    auth: AuthenticatedRequest = Depends(require_read),
+    db: Session = Depends(get_db),
+):
+    """Accept a plain-English question and return matching assets via AI."""
+    # get_unified_assets is already imported as list_unified_assets above
+    from services.ai_provider_service import AIProviderService
+    import json as _json
+
+    tenant_id = body.tenant_id or auth.tenant_id
+
+    all_assets = list_unified_assets(db, tenant_id)
+    if not all_assets:
+        return {
+            "question": body.question,
+            "matches": [],
+            "explanation": "No assets found for this tenant.",
+            "match_count": 0,
+            "total_assets": 0,
+        }
+
+    def _summarise(a):
+        return {
+            "uid":      a.get("uid") or a.get("agent_id") or str(a.get("id", "")),
+            "hostname": a.get("hostname") or a.get("display_name") or "unknown",
+            "os":       a.get("os_family") or a.get("os_name") or "unknown",
+            "version":  a.get("os_version") or "",
+            "ips":      (a.get("ips") or ([a.get("ip")] if a.get("ip") else []))[:3],
+            "type":     "agent" if (a.get("agent_id") and a.get("source") != "network") else "network",
+        }
+
+    summaries = [_summarise(a) for a in all_assets]
+    asset_json = _json.dumps(summaries, indent=2)
+
+    system_prompt = (
+        "You are an IT asset intelligence assistant. "
+        "Return ONLY valid JSON with keys 'matches' (array of uid strings) and 'explanation' (string). "
+        "No markdown fences, no extra text outside the JSON object."
+    )
+    user_message = (
+        "User question: " + body.question + "\n\n"
+        "Assets:\n" + asset_json + "\n\n"
+        "Which assets match the question? "
+        "Return JSON: {\"matches\": [\"uid1\", \"uid2\"], \"explanation\": \"...\"}"
+    )
+
+    try:
+        ai_svc = AIProviderService()
+        resp   = ai_svc.call(system_prompt, user_message, max_tokens=800)
+        raw    = resp.content.strip()
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw   = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+        parsed       = _json.loads(raw.strip())
+        matched_uids = set(str(u) for u in parsed.get("matches", []))
+        explanation  = parsed.get("explanation", "")
+    except Exception as exc:
+        return {
+            "question":     body.question,
+            "matches":      [],
+            "explanation":  "AI query failed: " + str(exc),
+            "match_count":  0,
+            "total_assets": len(all_assets),
+        }
+
+    matched_assets = [
+        a for a in all_assets
+        if str(a.get("uid") or a.get("agent_id") or a.get("id", "")) in matched_uids
+    ]
+
+    return {
+        "question":     body.question,
+        "matches":      matched_assets,
+        "explanation":  explanation,
+        "match_count":  len(matched_assets),
+        "total_assets": len(all_assets),
+    }
+
+
+@router.get("/unified/{asset_uid}")
+def get_unified_asset_route(
+    asset_uid: str,
+    auth: AuthenticatedRequest = Depends(require_read),
+    db: Session = Depends(get_db),
+):
+    asset = get_unified_asset(db, auth.tenant_id, asset_uid)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Unified asset not found.")
+    return asset

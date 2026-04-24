@@ -1,0 +1,144 @@
+.pro-sidebar {
+  width: 300px;
+  padding: 20px 12px;
+  background: #0d1b2d;
+}
+
+.pro-brand {
+  padding: 0 8px 18px;
+  margin-bottom: 0;
+}
+
+.pro-brand .brand-mark {
+  background: linear-gradient(135deg, #06b6d4, #2563eb);
+}
+
+.pro-brand span {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  color: #7f91a7;
+}
+
+.tenant-box {
+  margin: 0 -12px 18px;
+  padding: 16px;
+  background: #103a51;
+  border-top: 1px solid #1c506b;
+  border-bottom: 1px solid #1c506b;
+}
+
+.tenant-box span {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  color: #8aa3b8;
+}
+
+.tenant-box strong {
+  display: block;
+  margin-top: 6px;
+  color: #22d3ee;
+  font-size: 18px;
+}
+
+.pro-nav {
+  height: calc(100vh - 230px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.menu-group {
+  margin-bottom: 22px;
+}
+
+.menu-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 6px 8px;
+}
+
+.menu-title span {
+  font-size: 11px;
+  letter-spacing: 1.8px;
+  color: #7f91a7;
+}
+
+.menu-title div {
+  flex: 1;
+  height: 1px;
+  background: #22364d;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 10px;
+  border-radius: 0;
+  color: #dbeafe;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.menu-item.active {
+  background: #0d4a63;
+  color: #22d3ee;
+}
+
+.menu-item:hover {
+  background: #12324d;
+}
+
+.menu-icon {
+  width: 20px;
+  color: #8ea4bb;
+  text-align: center;
+}
+
+.menu-item em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #075985;
+  color: #22d3ee;
+}
+
+.menu-item em.badge-danger {
+  background: #3b1f2d;
+  color: #fb7185;
+}
+
+.user-card {
+  border-top: 1px solid #22364d;
+  padding: 16px 8px 4px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #0e7490;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+}
+
+.user-card strong {
+  display: block;
+  color: #fff;
+  font-size: 14px;
+}
+
+.user-card span {
+  display: block;
+  color: #8ea4bb;
+  font-size: 12px;
+}
